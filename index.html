@@ -33,6 +33,149 @@
   <link rel="manifest" href="manifest.json">
 </head>
 <body>
+  <script>
+    // ============================================
+    // PWA UTILITIES - PLATFORM DETECTION & INSTALL
+    // ============================================
+    
+    // Global variable to store deferred install prompt
+    let deferredInstallPrompt = null;
+    
+    /**
+     * Detects if the app is running as an installed PWA
+     * Returns true if running in standalone mode (installed)
+     * Returns false if running in browser
+     */
+    function isPwaInstalled() {
+      // Method 1: Check display-mode media query (most reliable)
+      if (window.matchMedia('(display-mode: standalone)').matches) {
+        return true;
+      }
+      
+      // Method 2: iOS Safari standalone mode
+      if (window.navigator.standalone === true) {
+        return true;
+      }
+      
+      // Method 3: Fallback check for Android
+      if (document.referrer.includes('android-app://')) {
+        return true;
+      }
+      
+      return false;
+    }
+    
+    /**
+     * Captures the beforeinstallprompt event
+     * Only fires in browsers when PWA is installable
+     */
+    window.addEventListener('beforeinstallprompt', (e) => {
+      console.log('[PWA] Install prompt available');
+      // Prevent default mini-infobar on mobile
+      e.preventDefault();
+      // Store the event for later use
+      deferredInstallPrompt = e;
+      
+      // Notify Flutter that install is available
+      if (window.flutterPwaInstallAvailable) {
+        window.flutterPwaInstallAvailable();
+      }
+    });
+    
+    /**
+     * Triggers the PWA install prompt
+     * Called from Flutter when user clicks "Install" button
+     */
+    function installPwa() {
+      if (!deferredInstallPrompt) {
+        console.warn('[PWA] No install prompt available');
+        return false;
+      }
+      
+      // Show the install prompt
+      deferredInstallPrompt.prompt();
+      
+      // Wait for user choice
+      deferredInstallPrompt.userChoice.then((choiceResult) => {
+        if (choiceResult.outcome === 'accepted') {
+          console.log('[PWA] User accepted install');
+        } else {
+          console.log('[PWA] User dismissed install');
+        }
+        // Clear the prompt after use
+        deferredInstallPrompt = null;
+      });
+      
+      return true;
+    }
+    
+    // ============================================
+    // SERVICE WORKER - UPDATE DETECTION
+    // ============================================
+    
+    /**
+     * Registers service worker and sets up update detection
+     */
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.register('flutter_service_worker.js?v=1057133492').then((registration) => {
+        console.log('[PWA] Service Worker registered');
+        
+        // Check for updates periodically (every 60 seconds)
+        setInterval(() => {
+          registration.update();
+        }, 60000);
+        
+        // Listen for new service worker waiting
+        registration.addEventListener('updatefound', () => {
+          const newWorker = registration.installing;
+          
+          newWorker.addEventListener('statechange', () => {
+            if (newWorker.state === 'installed' && navigator.serviceWorker.controller) {
+              // New service worker is waiting - dispatch custom event
+              console.log('[PWA] Update available');
+              const event = new CustomEvent('pwaUpdateAvailable', {
+                detail: { registration: registration }
+              });
+              window.dispatchEvent(event);
+            }
+          });
+        });
+      }).catch((error) => {
+        console.error('[PWA] Service Worker registration failed:', error);
+      });
+      
+      // Auto-reload when new service worker takes control
+      navigator.serviceWorker.addEventListener('controllerchange', () => {
+        console.log('[PWA] New service worker activated - reloading');
+        window.location.reload();
+      });
+    }
+    
+    /**
+     * Activates waiting service worker
+     * Called from Flutter when user clicks "Update" button
+     */
+    function activatePwaUpdate() {
+      if (!navigator.serviceWorker.controller) {
+        console.warn('[PWA] No service worker controller');
+        return false;
+      }
+      
+      navigator.serviceWorker.ready.then((registration) => {
+        if (registration.waiting) {
+          // Tell waiting service worker to skip waiting
+          registration.waiting.postMessage({ type: 'SKIP_WAITING' });
+          return true;
+        }
+        return false;
+      });
+      
+      return true;
+    }
+    
+    console.log('[PWA] Utilities loaded - isPWA:', isPwaInstalled());
+  </script>
   <script src="flutter_bootstrap.js" async></script>
+
 </body>
 </html>
